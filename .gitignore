@@ -1,3 +1,19 @@
+# Node.js
 node_modules/
-uploads/
 .env
+uploads/
+dist/
+coverage/
+
+# Logs
+*.log
+npm-debug.log*
+
+# macOS
+.DS_Store
+
+# VS Code
+.vscode/
+
+# OS-generated
+Thumbs.db
