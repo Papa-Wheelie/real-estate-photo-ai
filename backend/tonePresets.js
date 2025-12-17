@@ -34,7 +34,7 @@ export const tonePresets = {
     contrast: 1.06,
     gamma: 1.0,
     rgb: [1.05, 1.02, 0.96], // warmer than before
-    overlay: { color: { r: 255, g: 205, b: 140, alpha: 0.22 }, blend: 'soft-light' }
+    overlay: { color: { r: 255, g: 205, b: 140, alpha: 0.22 }, blend: 'soft-light' },
     vignette: 0.08
   },
 

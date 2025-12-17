@@ -4,12 +4,13 @@ import { tonePresets } from '../tonePresets.js';
 
 export const processImage = async (req, res) => {
   const debug = req.query.debug === '1';
-
-  const tone = req.body.tone || 'light-filled';
+  const tone = String(req.body.tone || 'light-filled').trim().toLowerCase();
   const toneAliases = {
-    'bright': 'bright-fresh',
-    'fresh': 'bright-fresh',
-    'dusk': 'moody',
+    bright: 'bright-fresh',
+    fresh: 'bright-fresh',
+    sunset: 'warm-sunset',
+    warm: 'warm-sunset',
+    dusk: 'moody',
     'moody-dusk': 'moody',
   };
 
