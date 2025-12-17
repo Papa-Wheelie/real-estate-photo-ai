@@ -12,6 +12,7 @@ app.use(cors());
 app.use(express.json());
 
 // Hook up image processing routes
+app.get("/health", (_req, res) => res.json({ ok: true }));
 app.use('/api/images', imageRoutes);
 
 app.listen(PORT, () => {
