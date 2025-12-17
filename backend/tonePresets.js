@@ -19,13 +19,23 @@ export const tonePresets = {
     overlay: { color: { r: 25, g: 35, b: 60, alpha: 0.16 }, blend: 'multiply' }, // reduce tint strength
     vignette: 0.18                    // lighter vignette
   },
- 
+
   'light-filled': {
     brightness: 1.06,
     saturation: 1.03,
     contrast: 1.06,
     gamma: 1.0,
     rgb: [1.0, 1.0, 1.0]
+  },
+
+  'warm-sunset': {
+    brightness: 1.07,
+    saturation: 1.04,
+    contrast: 1.06,
+    gamma: 1.0,
+    rgb: [1.05, 1.02, 0.96], // warmer than before
+    overlay: { color: { r: 255, g: 205, b: 140, alpha: 0.22 }, blend: 'soft-light' }
+    vignette: 0.08
   },
 
   'natural': {

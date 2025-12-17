@@ -3,6 +3,8 @@ import fs from 'fs';
 import { tonePresets } from '../tonePresets.js';
 
 export const processImage = async (req, res) => {
+  const debug = req.query.debug === '1';
+
   const tone = req.body.tone || 'light-filled';
   const toneAliases = {
     'bright': 'bright-fresh',
@@ -10,7 +12,7 @@ export const processImage = async (req, res) => {
     'dusk': 'moody',
     'moody-dusk': 'moody',
   };
-  
+
   const resolvedTone = toneAliases[tone] || tone;
   const preset = tonePresets[resolvedTone] || tonePresets['light-filled'];
 
@@ -83,6 +85,16 @@ export const processImage = async (req, res) => {
       .jpeg({ quality: 88, progressive: true, mozjpeg: true })
       .toBuffer();
 
+    if (debug) {
+      return res.json({
+        tone: resolvedTone ?? tone,
+        width: info.width,
+        height: info.height,
+        preset,
+        bytes: processed.length,
+      });
+    }
+
     // ✅ Send response
     res.set('Content-Type', 'image/jpeg');
     res.send(processed);
@@ -91,6 +103,6 @@ export const processImage = async (req, res) => {
     res.status(500).json({ error: err.message });
   } finally {
     // ✅ Always cleanup temp file
-    try { fs.unlinkSync(req.file.path); } catch {}
+    try { fs.unlinkSync(req.file.path); } catch { }
   }
 };
