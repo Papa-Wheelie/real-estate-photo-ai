@@ -1,10 +1,16 @@
-import express from 'express';
-import multer from 'multer';
-import { processImage } from '../controllers/imageController.js';
+import { Router } from "express";
+import multer from "multer";
+import { processImage, processPro } from "../controllers/imageController.js";
 
-const router = express.Router();
-const upload = multer({ dest: 'uploads/' });
+const router = Router();
 
-router.post('/process', upload.single('image'), processImage);
+// IMPORTANT: this path is relative to where you run node (backend/),
+// so "uploads/" maps to backend/uploads/
+const upload = multer({ dest: "uploads/" });
+
+router.post("/process", upload.single("image"), processImage);
+// router.post("/ai-variation", upload.single("image"), aiVariation);
+router.post("/pro", upload.single("image"), processPro);
+
 
 export default router;
