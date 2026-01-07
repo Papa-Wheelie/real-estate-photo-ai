@@ -5,8 +5,17 @@ export const tonePresets = {
     saturation: 1.02, // was 1.04 (calm the greens)
     contrast: 1.04,
     gamma: 1.0,
-    rgb: [0.985, 1.0, 1.045], // tiny step back from cool
-    overlay: { color: { r: 245, g: 250, b: 255, alpha: 0.20 }, blend: 'screen' } // was 0.22
+    rgb: [0.985, 1.0, 1.045],
+    overlay: { color: { r: 245, g: 250, b: 255, alpha: 0.16 }, blend: 'screen' },
+
+    // (safe caps for adaptive scaling)
+    caps: {
+      brightnessMax: 1.28,
+      contrastMax: 1.10,
+      overlayAlphaMax: 0.28,
+      saturationMin: 0.98,
+      saturationMax: 1.06,
+    }    
   },
 
   // Moody dusk-ish: darker midtones, warmer shadows, vignette
