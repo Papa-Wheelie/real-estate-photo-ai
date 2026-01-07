@@ -1,9 +1,12 @@
 import sharp from "sharp";
 import fs from "fs";
 import path from "path";
+import archiver from "archiver";
+
 import { tonePresets } from "../tonePresets.js";
 import { titanInpaint } from "../src/services/bedrockImage.js";
 import { pickTitanSize } from "../src/utils/titanSizes.js";
+
 
 
 function clamp01(n) {
@@ -122,23 +125,8 @@ function adaptBrightFresh(preset, analysis) {
 }
 
 
-
-// Stage 1: Bright & Fresh (deterministic) wrapper
-export const processBrightFresh = async (req, res) => {
-  // Force the tone preset no matter what the client sends
-  req.body = req.body || {};
-  req.body.tone = "bright-fresh";
-
-  // Reuse existing deterministic pipeline
-  return processImage(req, res);
-};
-
-
-// --- Legacy Code below 
-
-export const processImage = async (req, res) => {
-  const debug = req.query.debug === "1";
-  const tone = String(req.body.tone || "bright-fresh").trim().toLowerCase();
+function resolveTonePreset(rawTone) {
+  const tone = String(rawTone || "bright-fresh").trim().toLowerCase();
 
   const toneAliases = {
     bright: "bright-fresh",
@@ -150,66 +138,66 @@ export const processImage = async (req, res) => {
   };
 
   const resolvedTone = toneAliases[tone] || tone;
-  let preset = tonePresets[resolvedTone] || tonePresets["light-filled"];
+  const preset = tonePresets[resolvedTone] || tonePresets["light-filled"];
+  return { resolvedTone, preset };
+}
 
-  // --- Stage 1: adaptive tuning for bright-fresh only ---
-  let analysis = null;
+function safeBaseName(originalName = "image") {
+  const base = path.parse(originalName).name || "image";
+  return base
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-|-$/g, "");
+}
 
-  if (resolvedTone === "bright-fresh") {
-    analysis = await analyseLuma(req.file.path);
-    preset = adaptBrightFresh(preset, analysis);
+/**
+ * Deterministic pipeline: identical to your current processImage flow
+ * but returns a buffer + info instead of writing to res.
+ */
+async function renderDeterministicJpeg(inputPath, preset, { maxDim = 2560 } = {}) {
+  let base = sharp(inputPath)
+    .rotate()
+    .toColourspace("srgb")
+    .resize({
+      width: maxDim,
+      height: maxDim,
+      fit: "inside",
+      withoutEnlargement: true,
+    })
+    .normalise();
+
+  if (preset.rgb) base = base.linear(preset.rgb, [0, 0, 0]);
+
+  const { data: baseBuf, info } = await base
+    .modulate({ brightness: preset.brightness, saturation: preset.saturation })
+    .gamma(Math.max(1.0, preset.gamma ?? 1.0))
+    .linear(preset.contrast, 0)
+    .sharpen(1.0)
+    .jpeg({ quality: 92 })
+    .toBuffer({ resolveWithObject: true });
+
+  const composites = [];
+
+  if (preset.overlay) {
+    const { r, g, b, alpha } = preset.overlay.color;
+    const overlayBuf = await sharp({
+      create: {
+        width: info.width,
+        height: info.height,
+        channels: 4,
+        background: { r, g, b, alpha },
+      },
+    })
+      .png()
+      .toBuffer();
+
+    composites.push({ input: overlayBuf, blend: preset.overlay.blend });
   }
 
-
-  if (!req.file?.path) {
-    return res.status(400).json({ error: "Missing image file (field name: image)" });
-  }
-
-  try {
-    const MAX_DIM = 2560;
-
-    let base = sharp(req.file.path)
-      .rotate()
-      .toColourspace("srgb")
-      .resize({
-        width: MAX_DIM,
-        height: MAX_DIM,
-        fit: "inside",
-        withoutEnlargement: true,
-      })
-      .normalise();
-
-    if (preset.rgb) base = base.linear(preset.rgb, [0, 0, 0]);
-
-    const { data: baseBuf, info } = await base
-      .modulate({ brightness: preset.brightness, saturation: preset.saturation })
-      .gamma(Math.max(1.0, preset.gamma ?? 1.0))
-      .linear(preset.contrast, 0)
-      .sharpen(1.0)
-      .jpeg({ quality: 92 })
-      .toBuffer({ resolveWithObject: true });
-
-    const composites = [];
-
-    if (preset.overlay) {
-      const { r, g, b, alpha } = preset.overlay.color;
-      const overlayBuf = await sharp({
-        create: {
-          width: info.width,
-          height: info.height,
-          channels: 4,
-          background: { r, g, b, alpha },
-        },
-      })
-        .png()
-        .toBuffer();
-
-      composites.push({ input: overlayBuf, blend: preset.overlay.blend });
-    }
-
-    if (preset.vignette) {
-      const strength = Math.max(0, Math.min(1, preset.vignette));
-      const vignetteSvg = `
+  if (preset.vignette) {
+    const strength = Math.max(0, Math.min(1, preset.vignette));
+    const vignetteSvg = `
 <svg width="${info.width}" height="${info.height}" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <radialGradient id="v" cx="50%" cy="50%" r="65%">
@@ -219,36 +207,108 @@ export const processImage = async (req, res) => {
   </defs>
   <rect x="0" y="0" width="100%" height="100%" fill="url(#v)"/>
 </svg>`;
+    composites.push({ input: Buffer.from(vignetteSvg), blend: "multiply" });
+  }
 
-      composites.push({ input: Buffer.from(vignetteSvg), blend: "multiply" });
-    }
+  let out = sharp(baseBuf);
+  if (composites.length) out = out.composite(composites);
 
-    let out = sharp(baseBuf);
-    if (composites.length) out = out.composite(composites);
+  const processed = await out
+    .jpeg({ quality: 88, progressive: true, mozjpeg: true })
+    .toBuffer();
 
-    const processed = await out.jpeg({ quality: 88, progressive: true, mozjpeg: true }).toBuffer();
+  return { processed, info };
+}
+
+
+
+
+// Stage 1: Bright & Fresh (deterministic) wrapper
+export const processBrightFresh = async (req, res) => {
+  req.body = req.body || {};
+  req.body.tone = "bright-fresh";
+  return processImage(req, res);
+};
+
+
+// Legacy deterministic endpoint (now using helper)
+export const processImage = async (req, res) => {
+  const debug = req.query.debug === "1";
+  const { resolvedTone, preset } = resolveTonePreset(req.body.tone);
+
+  if (!req.file?.path) {
+    return res.status(400).json({ error: "Missing image file (field name: image)" });
+  }
+
+  try {
+    const { processed, info } = await renderDeterministicJpeg(req.file.path, preset, {
+      maxDim: 2560,
+    });
 
     if (debug) {
       return res.json({
         tone: resolvedTone,
         width: info.width,
         height: info.height,
-        analysis,          // NEW
-        appliedPreset: preset, // NEW (after adaptive changes)
+        preset,
         bytes: processed.length,
       });
     }
 
     res.set("Content-Type", "image/jpeg");
-    res.send(processed);
+    return res.send(processed);
   } catch (err) {
     console.error("Image processing error:", err);
-    res.status(500).json({ error: err.message });
+    return res.status(500).json({ error: err.message });
   } finally {
     try {
       fs.unlinkSync(req.file.path);
     } catch {}
   }
+};
+
+export const processBrightFreshBatch = async (req, res) => {
+  const files = req.files || [];
+  if (!files.length) {
+    return res.status(400).json({ error: "Missing image files (field name: images)" });
+  }
+
+  // Force preset to bright-fresh
+  const { preset } = resolveTonePreset("bright-fresh");
+
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", 'attachment; filename="bright-fresh.zip"');
+
+  const archive = archiver("zip", { zlib: { level: 9 } });
+
+  archive.on("error", (err) => {
+    console.error("ZIP error:", err);
+    try {
+      if (!res.headersSent) res.status(500);
+      res.end();
+    } catch {}
+  });
+
+  archive.pipe(res);
+
+  // Process sequentially to keep memory stable
+  for (const f of files) {
+    try {
+      const { processed } = await renderDeterministicJpeg(f.path, preset, { maxDim: 2560 });
+      const base = safeBaseName(f.originalname);
+      archive.append(processed, { name: `${base}-bright-fresh.jpg` });
+    } catch (err) {
+      // include an error txt inside the zip rather than failing the whole batch
+      const base = safeBaseName(f.originalname);
+      archive.append(String(err?.message || err), { name: `${base}-ERROR.txt` });
+    } finally {
+      try {
+        fs.unlinkSync(f.path);
+      } catch {}
+    }
+  }
+
+  await archive.finalize();
 };
 
 // function clamp(n, min, max) {
